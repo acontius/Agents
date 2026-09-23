@@ -11,6 +11,27 @@ services:
       - "5434:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U report_agent -d daily_reports"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    container_name: daily-report-app
+    restart: unless-stopped
+    ports:
+      - "7860:7860"
+    environment:
+      DATABASE_URL: postgresql+psycopg://report_agent:report_agent_password@postgres:5432/daily_reports
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-openrouter/free}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - .:/app
 
 volumes:
   postgres_data:
