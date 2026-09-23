@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:17
+    container_name: daily-report-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: daily_reports
+      POSTGRES_USER: report_agent
+      POSTGRES_PASSWORD: report_agent_password
+    ports:
+      - "5434:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:
