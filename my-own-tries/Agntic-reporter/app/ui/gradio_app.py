@@ -42,17 +42,25 @@ def _parse_optional_date(value: str | None) -> Optional[date]:
 
 
 def chat_respond(message: str, history: list) -> tuple[str, list]:
-    """Gradio chatbot callback. history is list of [user, assistant] pairs."""
-    if not message or not message.strip():
-        return "", history
+    """Gradio chatbot callback.
 
+    Supports legacy [[user, assistant], ...] pairs and message-dict history.
+    """
+    if not message or not message.strip():
+        return "", history or []
+
+    history = list(history or [])
     openai_history: list[dict[str, Any]] = []
-    for pair in history:
-        if isinstance(pair, (list, tuple)) and len(pair) >= 2:
-            if pair[0]:
-                openai_history.append({"role": "user", "content": pair[0]})
-            if pair[1]:
-                openai_history.append({"role": "assistant", "content": pair[1]})
+    for item in history:
+        if isinstance(item, (list, tuple)) and len(item) >= 2:
+            if item[0]:
+                openai_history.append({"role": "user", "content": str(item[0])})
+            if item[1]:
+                openai_history.append({"role": "assistant", "content": str(item[1])})
+        elif isinstance(item, dict) and item.get("role") and item.get("content"):
+            openai_history.append(
+                {"role": item["role"], "content": str(item["content"])}
+            )
 
     try:
         with get_db() as session:
