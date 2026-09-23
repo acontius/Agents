@@ -27,11 +27,16 @@ services:
       DATABASE_URL: postgresql+psycopg://report_agent:report_agent_password@postgres:5432/daily_reports
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       OPENROUTER_MODEL: ${OPENROUTER_MODEL:-openrouter/free}
+      GRADIO_SERVER_NAME: "0.0.0.0"
+      GRADIO_SERVER_PORT: "7860"
     depends_on:
       postgres:
         condition: service_healthy
-    volumes:
-      - .:/app
+    # Do NOT mount host source over /app — that overrides the image and
+    # causes ModuleNotFoundError if the local tree is incomplete.
+    # For local live-reload dev, uncomment:
+    # volumes:
+    #   - .:/app
 
 volumes:
   postgres_data:

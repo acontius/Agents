@@ -12,8 +12,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Wait for postgres then start
 ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/app
 EXPOSE 7860
 
 CMD ["python", "-m", "app.main"]
