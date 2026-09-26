@@ -10,7 +10,6 @@ import gradio as gr
 
 from app.agent.agent import generate_weekly_report, run_agent
 from app.database import get_db
-from app.models import Report
 from app.reports.retrieval import search_reports
 from app.reports.service import create_report
 
@@ -41,26 +40,55 @@ def _parse_optional_date(value: str | None) -> Optional[date]:
     raise ValueError(f"Invalid date: {value!r}. Use YYYY-MM-DD")
 
 
-def chat_respond(message: str, history: list) -> tuple[str, list]:
-    """Gradio chatbot callback.
+def _normalize_chat_history(history: list | None) -> list[dict[str, str]]:
+    """Convert Gradio history (tuples or message dicts) to messages format.
 
-    Supports legacy [[user, assistant], ...] pairs and message-dict history.
+    Output is always a list of {"role": "...", "content": "..."} dicts,
+    which is what Gradio Chatbot(type=\"messages\") expects.
     """
-    if not message or not message.strip():
-        return "", history or []
-
-    history = list(history or [])
-    openai_history: list[dict[str, Any]] = []
-    for item in history:
-        if isinstance(item, (list, tuple)) and len(item) >= 2:
+    messages: list[dict[str, str]] = []
+    for item in history or []:
+        if isinstance(item, dict) and item.get("role") is not None:
+            content = item.get("content", "")
+            if isinstance(content, list):
+                parts = []
+                for block in content:
+                    if isinstance(block, dict) and "text" in block:
+                        parts.append(str(block["text"]))
+                    else:
+                        parts.append(str(block))
+                content = "".join(parts)
+            messages.append({"role": str(item["role"]), "content": str(content or "")})
+        elif isinstance(item, (list, tuple)) and len(item) >= 2:
             if item[0]:
-                openai_history.append({"role": "user", "content": str(item[0])})
+                messages.append({"role": "user", "content": str(item[0])})
             if item[1]:
-                openai_history.append({"role": "assistant", "content": str(item[1])})
-        elif isinstance(item, dict) and item.get("role") and item.get("content"):
-            openai_history.append(
-                {"role": item["role"], "content": str(item["content"])}
-            )
+                messages.append({"role": "assistant", "content": str(item[1])})
+    return messages
+
+
+def _history_to_openai(messages: list[dict[str, str]]) -> list[dict[str, Any]]:
+    """Map Gradio messages to OpenAI-style history for run_agent."""
+    return [
+        {"role": m["role"], "content": m["content"]}
+        for m in messages
+        if m.get("role") in ("user", "assistant") and m.get("content")
+    ]
+
+
+def chat_respond(message: str, history: list) -> tuple[str, list[dict[str, str]]]:
+    """Gradio chatbot callback — returns messages-format history.
+
+    Gradio Chatbot(type=\"messages\") requires each entry to be a dict with
+    'role' and 'content' keys. Tuple pairs [[user, assistant], ...] cause:
+    \"Data incompatible with messages format\".
+    """
+    messages = _normalize_chat_history(history)
+
+    if not message or not message.strip():
+        return "", messages
+
+    openai_history = _history_to_openai(messages)
 
     try:
         with get_db() as session:
@@ -69,8 +97,11 @@ def chat_respond(message: str, history: list) -> tuple[str, list]:
         logger.exception("chat error")
         answer = f"Error: {type(exc).__name__}: {exc}"
 
-    history = history + [[message, answer]]
-    return "", history
+    messages = messages + [
+        {"role": "user", "content": message.strip()},
+        {"role": "assistant", "content": answer},
+    ]
+    return "", messages
 
 
 def submit_report(
@@ -101,14 +132,20 @@ def submit_report(
                 end_time=end_time,
                 generate=True,
             )
+            report_id = report.id
+            report_person = report.person
+            report_date_iso = report.report_date.isoformat()
+            report_start = report.start_time
+            report_end = report.end_time
             generated = report.generated_report or ""
-            status = (
-                f"✅ Report saved (id={report.id})\n"
-                f"Person: {report.person}\n"
-                f"Date: {report.report_date.isoformat()}\n"
-                f"Hours: {report.start_time} – {report.end_time}"
-            )
-            return status, generated
+
+        status = (
+            f"✅ Report saved (id={report_id})\n"
+            f"Person: {report_person}\n"
+            f"Date: {report_date_iso}\n"
+            f"Hours: {report_start} – {report_end}"
+        )
+        return status, generated
     except ValueError as exc:
         return f"❌ Invalid input: {exc}", ""
     except Exception as exc:
@@ -121,9 +158,16 @@ def load_history(
     date_from_str: str,
     date_to_str: str,
 ) -> str:
+    """Load reports and format them as plain text.
+
+    ORM objects are converted to dicts *inside* the active session so that
+    no attribute access happens after the session is closed
+    (which would raise DetachedInstanceError).
+    """
     try:
         date_from = _parse_optional_date(date_from_str)
         date_to = _parse_optional_date(date_to_str)
+
         with get_db() as session:
             reports = search_reports(
                 session,
@@ -132,16 +176,19 @@ def load_history(
                 date_to=date_to,
                 limit=50,
             )
-        if not reports:
+            report_data = [r.to_dict() for r in reports]
+
+        if not report_data:
             return "No reports found."
+
         blocks: list[str] = []
-        for r in reports:
+        for d in report_data:
             blocks.append(
-                f"{'='*50}\n"
-                f"ID: {r.id} | {r.person} | {r.report_date.isoformat()}\n"
-                f"Hours: {r.start_time} – {r.end_time}\n\n"
-                f"--- Generated ---\n{r.generated_report or '(none)'}\n\n"
-                f"--- Raw ---\n{r.raw_text}\n"
+                f"{'=' * 50}\n"
+                f"ID: {d['id']} | {d['person']} | {d['report_date']}\n"
+                f"Hours: {d['start_time']} – {d['end_time']}\n\n"
+                f"--- Generated ---\n{d['generated_report'] or '(none)'}\n\n"
+                f"--- Raw ---\n{d['raw_text']}\n"
             )
         return "\n".join(blocks)
     except Exception as exc:
@@ -161,6 +208,19 @@ def weekly_report_ui(person: str, days: int) -> str:
         return f"Error: {type(exc).__name__}: {exc}"
 
 
+def _make_chatbot() -> gr.Chatbot:
+    """Create Chatbot in messages mode (required by current Gradio).
+
+    Gradio 4/5 accept type=\"messages\". Gradio 6 made messages the only
+    format and dropped the type= keyword — fall back gracefully.
+    """
+    kwargs: dict[str, Any] = {"label": "Agent", "height": 420}
+    try:
+        return gr.Chatbot(type="messages", **kwargs)
+    except TypeError:
+        return gr.Chatbot(**kwargs)
+
+
 def build_ui() -> gr.Blocks:
     with gr.Blocks(title="Team Reporting Agent") as demo:
         gr.Markdown(
@@ -169,7 +229,7 @@ def build_ui() -> gr.Blocks:
         )
 
         with gr.Tab("Chat"):
-            chatbot = gr.Chatbot(label="Agent", height=420)
+            chatbot = _make_chatbot()
             with gr.Row():
                 chat_input = gr.Textbox(
                     placeholder=(
