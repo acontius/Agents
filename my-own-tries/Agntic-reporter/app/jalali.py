@@ -1,7 +1,7 @@
 """Jalali (Persian/Shamsi) calendar utilities.
 
 PostgreSQL stores Gregorian dates. All user-facing dates use Jalali.
-Week boundaries follow the Iranian work week: Saturday to Thursday.
+Week boundaries follow the Iranian work week: Saturday → Thursday.
 """
 
 from __future__ import annotations
@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Optional
 
+# Month names (1-indexed)
 JALALI_MONTHS = (
     "",
     "فروردین",
@@ -26,6 +27,7 @@ JALALI_MONTHS = (
     "اسفند",
 )
 
+# Iranian work-week day order (Saturday first)
 WEEKDAY_NAMES_EN = (
     "Saturday",
     "Sunday",
@@ -40,10 +42,12 @@ _PERSIAN_DIGITS = str.maketrans("0123456789", "۰۱۲۳۴۵۶۷۸۹")
 
 
 def to_persian_digits(text: str) -> str:
+    """Convert ASCII digits in text to Persian numerals."""
     return str(text).translate(_PERSIAN_DIGITS)
 
 
 def gregorian_to_jalali(g: date) -> tuple[int, int, int]:
+    """Convert Gregorian date → (jy, jm, jd). Pure algorithm, no external deps."""
     gy, gm, gd = g.year, g.month, g.day
     g_d_m = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334]
     if gy > 1600:
@@ -79,6 +83,7 @@ def gregorian_to_jalali(g: date) -> tuple[int, int, int]:
 
 
 def jalali_to_gregorian(jy: int, jm: int, jd: int) -> date:
+    """Convert Jalali (jy, jm, jd) → Gregorian date."""
     if jy > 979:
         gy = 1600
         jy -= 979
@@ -126,18 +131,21 @@ def jalali_to_gregorian(jy: int, jm: int, jd: int) -> date:
 
 
 def format_jalali(g: date, *, persian_digits: bool = True) -> str:
+    """Format Gregorian date as Jalali string, e.g. «۵ مهر ۱۴۰۵»."""
     jy, jm, jd = gregorian_to_jalali(g)
     text = f"{jd} {JALALI_MONTHS[jm]} {jy}"
     return to_persian_digits(text) if persian_digits else text
 
 
 def format_jalali_month(g: date, *, persian_digits: bool = True) -> str:
+    """e.g. «مهر ۱۴۰۵»."""
     jy, jm, _ = gregorian_to_jalali(g)
     text = f"{JALALI_MONTHS[jm]} {jy}"
     return to_persian_digits(text) if persian_digits else text
 
 
 def format_time_display(t, *, persian_digits: bool = True) -> str:
+    """Format a time as HH:MM, optionally with Persian digits."""
     if t is None:
         return "—"
     if hasattr(t, "strftime"):
@@ -147,30 +155,39 @@ def format_time_display(t, *, persian_digits: bool = True) -> str:
     return to_persian_digits(text) if persian_digits else text
 
 
+# ---------- Iranian work week (Sat–Thu) ----------
+
 def saturday_of_week(g: date) -> date:
+    """Return the Saturday that starts the work week containing g.
+
+    Python weekday(): Mon=0 … Sun=6.
+    Saturday = 5 → days since Saturday = (weekday + 2) % 7
+    """
     return g - timedelta(days=(g.weekday() + 2) % 7)
 
 
 def thursday_of_week(g: date) -> date:
+    """Thursday that ends the work week containing g."""
     return saturday_of_week(g) + timedelta(days=5)
 
 
 @dataclass(frozen=True)
 class WorkWeek:
-    week_number: int
-    start: date
-    end: date
+    """One Iranian work week (Saturday → Thursday)."""
+
+    week_number: int  # 1-based within the Jalali year of the Saturday
+    start: date  # Saturday (Gregorian)
+    end: date  # Thursday (Gregorian)
     jalali_year: int
 
     def label(self, *, persian_digits: bool = True) -> str:
-        rng = (
-            f"{format_jalali(self.start, persian_digits=False)}"
-            f" تا {format_jalali(self.end, persian_digits=False)}"
-        )
+        """e.g. «Week 12 — ۳۰ شهریور تا ۵ مهر ۱۴۰۵»."""
+        rng = f"{format_jalali(self.start, persian_digits=False)} تا {format_jalali(self.end, persian_digits=False)}"
         text = f"Week {self.week_number} — {rng}"
         return to_persian_digits(text) if persian_digits else text
 
     def day_dates(self) -> dict[str, date]:
+        """Map English day name → Gregorian date for Sat–Thu."""
         return {
             name: self.start + timedelta(days=i)
             for i, name in enumerate(WEEKDAY_NAMES_EN[:6])
@@ -178,7 +195,12 @@ class WorkWeek:
 
 
 def jalali_week_number(g: date) -> int:
+    """1-based week number within the Jalali year (weeks start Saturday).
+
+    Week 1 is the week containing 1 Farvardin of that Jalali year.
+    """
     jy, _, _ = gregorian_to_jalali(g)
+    # 1 Farvardin of this Jalali year
     farvardin_1 = jalali_to_gregorian(jy, 1, 1)
     week1_sat = saturday_of_week(farvardin_1)
     this_sat = saturday_of_week(g)
@@ -187,6 +209,7 @@ def jalali_week_number(g: date) -> int:
 
 
 def work_week_for(g: date) -> WorkWeek:
+    """Build WorkWeek for the work week containing Gregorian date g."""
     start = saturday_of_week(g)
     end = start + timedelta(days=5)
     jy, _, _ = gregorian_to_jalali(start)
@@ -199,6 +222,7 @@ def work_week_for(g: date) -> WorkWeek:
 
 
 def previous_work_week(ww: WorkWeek) -> WorkWeek:
+    """The work week immediately before ww."""
     prev_thu = ww.start - timedelta(days=1)
     return work_week_for(prev_thu)
 
@@ -206,7 +230,7 @@ def previous_work_week(ww: WorkWeek) -> WorkWeek:
 @dataclass(frozen=True)
 class JalaliMonth:
     year: int
-    month: int
+    month: int  # 1-12
 
     @property
     def start(self) -> date:
@@ -214,6 +238,7 @@ class JalaliMonth:
 
     @property
     def end(self) -> date:
+        # Last day of month
         if self.month == 12:
             next_start = jalali_to_gregorian(self.year + 1, 1, 1)
         else:
@@ -231,6 +256,7 @@ def jalali_month_for(g: date) -> JalaliMonth:
 
 
 def parse_choice_key(choice: str) -> Optional[str]:
+    """Extract internal key from dropdown label «display||key»."""
     if not choice:
         return None
     if "||" in choice:
@@ -239,4 +265,5 @@ def parse_choice_key(choice: str) -> Optional[str]:
 
 
 def make_choice(display: str, key: str) -> str:
+    """Dropdown choice encoding display label + internal Gregorian key."""
     return f"{display}||{key}"
