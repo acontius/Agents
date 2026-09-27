@@ -1,17 +1,4 @@
-"""Core agentic loop with explicit tool calling.
-
-Flow (educational, intentionally explicit):
-
-  User message
-       ↓
-  LLM (with tool schemas)
-       ↓
-  tool_calls? ──yes──→ Python executes tool(s)
-       ↓                      ↓
-      no                 tool results appended
-       ↓                      ↓
-  Final answer  ←──────── LLM again
-"""
+"""Core agentic loop with explicit tool calling."""
 
 from __future__ import annotations
 
@@ -49,10 +36,6 @@ def run_agent(
     client: OpenAI | None = None,
     max_rounds: int = MAX_TOOL_ROUNDS,
 ) -> str:
-    """Run the tool-calling agent loop and return the final natural-language answer.
-
-    `history` is optional prior chat turns (list of {role, content}).
-    """
     settings = get_settings()
     llm = client or _client()
     logger.info("agent started")
@@ -144,71 +127,21 @@ def generate_weekly_report(
     date_to: Optional[str] = None,
     client: OpenAI | None = None,
 ) -> str:
-    """Generate a structured weekly report for a person.
+    """Generate structured English weekly Markdown for a person."""
+    from datetime import date
 
-    Uses retrieval + a focused LLM call (not the full agent loop) so the
-    output format stays consistent.
-    """
-    from datetime import date, timedelta
-
-    settings = get_settings()
-    llm = client or _client()
+    from app.jalali import work_week_for
+    from app.reports.aggregation import generate_weekly_markdown
 
     if date_from and date_to:
         from app.agent.tools import _parse_date
 
-        reports = get_reports_by_date_range(
-            session,
-            date_from=_parse_date(date_from),  # type: ignore
-            date_to=_parse_date(date_to),  # type: ignore
-            person=person,
-        )
-        period = f"{date_from} → {date_to}"
+        start = _parse_date(date_from)
+        end = _parse_date(date_to)
+        anchor = end or start or date.today()
     else:
-        reports = get_person_activity(session, person, days=days)
-        today = date.today()
-        period = f"{(today - timedelta(days=days - 1)).isoformat()} → {today.isoformat()}"
-
-    if not reports:
-        return (
-            f"Weekly Report\n\nPeriod: {period}\nPerson: {person}\n\n"
-            "No reports found for this period."
-        )
-
-    evidence = "\n".join(f"• {r.short_label()}" for r in reports)
-    context = format_reports_for_llm(reports)
-
-    user_content = (
-        f"Person: {person}\nPeriod: {period}\n\n"
-        f"Reports:\n{context}\n\n"
-        f"Evidence list:\n{evidence}"
+        anchor = date.today()
+    week = work_week_for(anchor)
+    return generate_weekly_markdown(
+        session, week=week, person=person or None, client=client
     )
-
-    try:
-        response = llm.chat.completions.create(
-            model=settings.openrouter_model,
-            messages=[
-                {"role": "system", "content": WEEKLY_REPORT_PROMPT},
-                {"role": "user", "content": user_content},
-            ],
-            temperature=0.2,
-            max_tokens=1200,
-        )
-        return (response.choices[0].message.content or "").strip()
-    except Exception as exc:
-        logger.error("weekly report LLM failed: %s", exc)
-        lines = [
-            "Weekly Report",
-            "",
-            f"Period: {period}",
-            f"Person: {person}",
-            "",
-            "Activities:",
-        ]
-        for r in reports:
-            snippet = (r.generated_report or r.raw_text or "")[:200]
-            lines.append(f"• {r.report_date}: {snippet}")
-        lines.extend(["", "Evidence:", evidence])
-        lines.append("")
-        lines.append("Progress: Not enough data to estimate progress (LLM unavailable).")
-        return "\n".join(lines)
