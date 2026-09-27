@@ -56,5 +56,5 @@ class Report(Base):
         }
 
     def short_label(self) -> str:
-        """Human-readable label used in evidence lists."""
-        return f"{self.report_date.isoformat()} — {self.person} (id={self.id})"
+        """Human-readable label for agent context (no database id)."""
+        return f"{self.report_date.isoformat()} — {self.person}"

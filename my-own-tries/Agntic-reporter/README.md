@@ -1,104 +1,57 @@
 # Team Reporting Agent (Agntic-reporter)
 
-Educational but practical **Team Daily Reporting Agent**.
+Educational team reporting agent: store daily reports in PostgreSQL, generate
+**English Markdown** daily / weekly / monthly reports with **Jalali dates**,
+and answer questions via a real OpenRouter **tool-calling** agent.
 
-Team members submit free-form daily reports. Everything is stored in PostgreSQL.
-An **Agentic AI** (tool-calling loop over OpenRouter) answers questions such as:
+## Features
 
-- «Amin هفته گذشته چه کارهایی انجام داده؟»
-- «What did the team work on last week?»
-- «Show everything related to Agentic Vulnerability Detection»
-- «Which reports support this conclusion?»
+| Area | Behavior |
+|------|----------|
+| **Add Report** | Select Jalali date from dropdown; English `#daily` Markdown generated |
+| **Reports** | Daily / Weekly / Monthly via period dropdowns (no typed dates) |
+| **Weekly table** | Sat–Thu board columns + Goal + Final % (evidence-based only) |
+| **History** | Jalali labels; no database IDs; session-safe ORM serialization |
+| **Chat** | Gradio messages format + real agent tool loop |
 
-The system **never invents** activities or exact progress percentages.
-Facts, summaries, and estimates are kept distinct.
+## Report formats
 
----
+**Daily** — `#daily # username` with Jalali date, entered/done times, English actions.
+
+**Weekly** — narrative sections (Assigned / Completed / In Progress / Next Week /
+Blockers / Suggestions) plus board table:
+
+`Person | Saturday | Sunday | Monday | Tuesday | Wednesday | Thursday | Goal | Final %`
+
+Week number is computed in Python (Iranian work week: Saturday–Thursday).
+**Final %** comes only from an explicit percentage in the **previous** week’s
+reports; otherwise `N/A`.
+
+**Monthly** — same narrative idea for the Jalali month + summary table.
+
+## Stack
+
+Python 3.12 · PostgreSQL · SQLAlchemy 2 · Gradio · OpenRouter · Docker Compose
+
+## Quick start
+
+```bash
+cp .env.example .env   # set OPENROUTER_API_KEY
+docker compose up -d --build
+# UI: http://localhost:7860
+```
+
+```bash
+pytest -q
+python -m compileall app tests
+```
 
 ## Architecture
 
 ```
-┌─────────────┐
-│  Gradio UI  │  Chat · Add Report · History · Weekly
-└──────┬──────┘
-       │
-┌──────▼──────┐     tool schemas      ┌──────────────────┐
-│   Agent     │ ◄───────────────────► │  OpenRouter LLM  │
-│  (loop)     │                       └──────────────────┘
-└──────┬──────┘
-       │ tool calls (Python)
-       ▼
-┌─────────────┐   ┌──────────────┐   ┌─────────────┐
-│  Retrieval  │   │ Report Svc   │   │  Web Fetch  │
-│  (SQL)      │   │ (parse+gen)  │   │  (httpx)    │
-└──────┬──────┘   └──────┬───────┘   └─────────────┘
-       │                 │
-       └────────┬────────┘
-                ▼
-        ┌───────────────┐
-        │  PostgreSQL   │
-        │  reports tbl  │
-        └───────────────┘
+User → Gradio → Agent (tool loop) → PostgreSQL / URL fetch → LLM → answer
+                 Reports UI → aggregation (Python dates + LLM summary)
 ```
 
-### Tool-calling loop (explicit)
-
-```
-User message
-    → LLM (with tool schemas)
-        → tool_calls? ──yes──→ Python executes tool(s)
-              │                      │
-             no                 results appended to messages
-              │                      │
-         Final answer  ←──────── LLM again
-```
-
-Tools: `search_reports`, `get_person_activity`, `get_project_activity`,
-`get_reports_by_date_range`, `get_report_by_id`, `fetch_url`.
-
----
-
-## Stack
-
-- Python 3.12 · PostgreSQL 17 · SQLAlchemy 2.x + psycopg 3
-- OpenRouter · Gradio · Docker Compose · pytest
-
----
-
-## Quick start (Docker)
-
-```bash
-cp .env.example .env
-# set OPENROUTER_API_KEY
-docker compose up --build
-```
-
-- App: http://localhost:7860
-- Postgres: localhost:5434
-
-## Tests
-
-```bash
-pip install -r requirements.txt
-pytest -v
-```
-
-Tests use in-memory SQLite and a mocked LLM (no API key required).
-
-## Environment
-
-```
-DATABASE_URL=postgresql+psycopg://report_agent:report_agent_password@localhost:5434/daily_reports
-OPENROUTER_API_KEY=sk-or-v1-...
-OPENROUTER_MODEL=openrouter/free
-```
-
-Never commit `.env`.
-
-## Design principles
-
-1. Explicit tool loop – no hidden agent framework magic.
-2. Raw text is sacred – always stored; generated report is extra.
-3. Facts vs inference – progress estimates must be labelled.
-4. Retrieval is isolated – easy to later add embeddings in Postgres.
-5. No over-engineering – no Redis, Celery, React, vector DB, auth.
+Jalali conversion: `app/jalali.py` (no external calendar dependency).
+Gregorian dates remain the database source of truth.
