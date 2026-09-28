@@ -92,10 +92,37 @@ def wait_for_db(max_retries: int = 30, delay: float = 2.0) -> None:
     )
 
 
+def _ensure_report_path_column(engine) -> None:
+    """Add reports.path if missing (existing DBs created before path support)."""
+    from sqlalchemy import inspect, text
+
+    try:
+        insp = inspect(engine)
+        if "reports" not in insp.get_table_names():
+            return
+        cols = {c["name"] for c in insp.get_columns("reports")}
+        if "path" not in cols:
+            with engine.begin() as conn:
+                conn.execute(
+                    text("ALTER TABLE reports ADD COLUMN path VARCHAR(128)")
+                )
+            logger.info("added reports.path column")
+    except Exception as exc:
+        logger.warning("path column migration skipped: %s", exc)
+
+
 def init_db() -> None:
-    """Create tables if they do not exist."""
+    """Create tables if they do not exist; seed default progress paths."""
     engine = get_engine()
     Base.metadata.create_all(bind=engine)
+    _ensure_report_path_column(engine)
+    try:
+        from app.reports.progress import ensure_default_paths
+
+        with get_db() as session:
+            ensure_default_paths(session)
+    except Exception as exc:
+        logger.warning("default path seed skipped: %s", exc)
     logger.info("database tables ensured")
 
 
