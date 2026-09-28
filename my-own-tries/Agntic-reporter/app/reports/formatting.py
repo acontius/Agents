@@ -1,7 +1,7 @@
 """Markdown formatters for daily / weekly / monthly English reports.
 
 No database IDs appear in any user-facing output.
-Final % is never invented — only emitted when evidence exists.
+Progress/percentage boards live in the Progress tab — not in reports.
 """
 
 from __future__ import annotations
@@ -110,6 +110,7 @@ def format_weekly_markdown(
     final_pct: dict[str, str],
     people: list[str],
 ) -> str:
+    """Weekly narrative only. Progress board is in the Progress tab."""
     uname = _username(person) if person else "team"
     lines = [
         f"#weekly # {uname}",
@@ -149,22 +150,6 @@ def format_weekly_markdown(
     lines.append("### Suggestions / Improvements")
     for t in narrative.get("suggestions", []) or ["-"]:
         lines.append(f"- {t}" if not str(t).startswith("-") else str(t))
-    lines.append("")
-    lines.append(
-        "| Person | Saturday | Sunday | Monday | Tuesday | Wednesday | Thursday | Goal | Final % |"
-    )
-    lines.append(
-        "| ------ | -------- | ------ | ------ | ------- | --------- | -------- | ---- | ------- |"
-    )
-    for p in people:
-        days = day_summaries.get(p, {})
-        cells = [
-            _safe_cell(p, 20),
-            *(_safe_cell(days.get(d, "—"), 40) for d in WEEKDAY_NAMES_EN[:6]),
-            _safe_cell(goals.get(p, "—"), 30),
-            _safe_cell(final_pct.get(p, "N/A"), 12),
-        ]
-        lines.append("| " + " | ".join(cells) + " |")
     return "\n".join(lines)
 
 
@@ -175,6 +160,7 @@ def format_monthly_markdown(
     narrative: dict[str, list[str]],
     table_rows: list[dict[str, str]],
 ) -> str:
+    """Monthly narrative only. Progress board is in the Progress tab."""
     uname = _username(person) if person else "team"
     lines = [
         f"#monthly # {uname}",
@@ -205,18 +191,6 @@ def format_monthly_markdown(
     lines.append("### Suggestions / Improvements")
     for t in narrative.get("suggestions", []) or ["-"]:
         lines.append(f"- {t}" if not str(t).startswith("-") else str(t))
-    lines.append("")
-    lines.append("| Person | Completed Work | In Progress | Goal | Final % |")
-    lines.append("| ------ | -------------- | ----------- | ---- | ------- |")
-    for row in table_rows:
-        cells = [
-            _safe_cell(row.get("person", "—"), 20),
-            _safe_cell(row.get("completed", "—"), 50),
-            _safe_cell(row.get("in_progress", "—"), 40),
-            _safe_cell(row.get("goal", "—"), 30),
-            _safe_cell(row.get("final_pct", "N/A"), 12),
-        ]
-        lines.append("| " + " | ".join(cells) + " |")
     return "\n".join(lines)
 
 
