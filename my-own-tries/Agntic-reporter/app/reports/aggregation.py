@@ -1,7 +1,8 @@
 """Weekly and monthly report aggregation.
 
-Python owns date ranges, week numbers, people, and Final %.
-The LLM only summarizes evidence into the required narrative sections.
+Python owns date ranges and week numbers.
+The LLM only summarizes evidence into narrative sections.
+Progress board lives in the Progress tab — not in report Markdown.
 """
 
 from __future__ import annotations
@@ -25,12 +26,12 @@ from app.jalali import (
     jalali_month_for,
 )
 from app.reports.formatting import (
+    _actions_from_report,
     build_day_summaries_from_dicts,
     extract_explicit_percentage,
     final_pct_for_people,
     format_monthly_markdown,
     format_weekly_markdown,
-    _actions_from_report,
 )
 from app.reports.retrieval import search_reports
 
@@ -144,6 +145,7 @@ def generate_weekly_markdown(
     person: str | None = None,
     client: OpenAI | None = None,
 ) -> str:
+    """Full weekly Markdown narrative only (progress board is in Progress tab)."""
     reports = search_reports(
         session, person=person, date_from=week.start, date_to=week.end, limit=200
     )
@@ -157,14 +159,6 @@ def generate_weekly_markdown(
         )
     people = _distinct_people(dicts)
     day_summaries = build_day_summaries_from_dicts(dicts, week)
-    prev = previous_work_week(week)
-    prev_reports = search_reports(
-        session, person=person, date_from=prev.start, date_to=prev.end, limit=200
-    )
-    prev_dicts = _reports_to_dicts(prev_reports)
-    final_pct = final_pct_for_people(prev_dicts, prev)
-    for p in people:
-        final_pct.setdefault(p, "N/A")
     narrative = _llm_narrative(
         kind="weekly",
         person=person,
@@ -187,7 +181,7 @@ def generate_weekly_markdown(
         day_summaries=day_summaries,
         narrative=narrative,
         goals=goals,
-        final_pct=final_pct,
+        final_pct={p: "N/A" for p in people},
         people=people,
     )
 
@@ -219,40 +213,27 @@ def generate_monthly_markdown(
         client=client,
     )
     goals = narrative.pop("goals", {}) if isinstance(narrative.get("goals"), dict) else {}
-    table_rows = []
-    by_person: dict[str, list[dict]] = defaultdict(list)
-    for d in dicts:
-        by_person[d.get("person") or "unknown"].append(d)
-    for p in people:
-        texts = []
-        for d in by_person[p]:
-            texts.append(d.get("generated_report") or "")
-            texts.append(d.get("raw_text") or "")
-        pct = extract_explicit_percentage(texts) or "N/A"
-        acts = []
-        for d in by_person[p]:
-            acts.extend(
-                _actions_from_report(d.get("raw_text") or "", d.get("generated_report"))[:2]
-            )
-        completed = "; ".join(acts[:5]) if acts else "—"
-        table_rows.append(
-            {
-                "person": p,
-                "completed": completed,
-                "in_progress": (narrative.get("in_progress") or ["—"])[0]
-                if p == (person or p)
-                else "—",
-                "goal": goals.get(p, "—"),
-                "final_pct": pct,
-            }
-        )
     if not narrative.get("completed"):
-        narrative["completed"] = [r["completed"] for r in table_rows if r["completed"] != "—"]
+        by_person: dict[str, list[dict]] = defaultdict(list)
+        for d in dicts:
+            by_person[d.get("person") or "unknown"].append(d)
+        completed_items: list[str] = []
+        for p in people:
+            acts: list[str] = []
+            for d in by_person[p]:
+                acts.extend(
+                    _actions_from_report(
+                        d.get("raw_text") or "", d.get("generated_report")
+                    )[:2]
+                )
+            if acts:
+                completed_items.append(f"{p}: " + "; ".join(acts[:3]))
+        narrative["completed"] = completed_items
     return format_monthly_markdown(
         person=person,
         month_label=label,
         narrative=narrative,
-        table_rows=table_rows,
+        table_rows=[],
     )
 
 
@@ -312,7 +293,6 @@ def generate_daily_markdown_for_date(
             parts.append(r.generated_report.strip())
         else:
             from app.reports.formatting import format_daily_markdown
-
             acts = _actions_from_report(r.raw_text or "", r.generated_report)
             parts.append(
                 format_daily_markdown(
