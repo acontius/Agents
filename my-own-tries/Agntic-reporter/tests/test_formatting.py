@@ -1,103 +1,105 @@
-"""Tests for daily/weekly/monthly Markdown formatters."""
+"""Daily / weekly / monthly Markdown format tests (no progress tables)."""
 
 from datetime import date, time
 
 from app.jalali import work_week_for
 from app.reports.formatting import (
     extract_explicit_percentage,
-    final_pct_for_people,
     format_daily_markdown,
     format_monthly_markdown,
     format_weekly_markdown,
 )
 
 
-def test_format_daily_structure():
+def test_daily_markdown_structure():
     md = format_daily_markdown(
         person="Amin",
-        report_date=date(2025, 9, 27),
+        report_date=date(2026, 9, 27),
         start_time=time(10, 40),
         end_time=time(20, 0),
-        actions=["Implemented tool calling", "Tested OpenRouter"],
+        actions=["Implemented tool calling", "Reviewed OpenRouter"],
     )
     assert md.startswith("#daily # amin")
-    assert "amin —" in md or "amin" in md
+    assert "amin —" in md
     assert "entered at =" in md
     assert "done at =" in md
     assert "actions:" in md
-    assert "Implemented tool calling" in md
+    assert "- Implemented tool calling" in md
     assert "id=" not in md.lower()
     assert "ID:" not in md
 
 
-def test_format_weekly_table_columns():
-    week = work_week_for(date(2025, 9, 27))
+def test_weekly_markdown_no_progress_table():
+    week = work_week_for(date(2026, 9, 27))
     md = format_weekly_markdown(
         person="Amin",
         week=week,
-        day_summaries={"Amin": {"Saturday": "setup", "Monday": "coding"}},
+        day_summaries={"Amin": {"Saturday": "Setup", "Monday": "Coding"}},
         narrative={
             "assigned": ["Ship agent"],
-            "completed": ["Tool loop"],
-            "in_progress": ["UI"],
+            "completed": ["Setup done"],
+            "in_progress": ["Coding"],
             "next_week": ["Tests"],
             "blockers": ["-"],
             "suggestions": ["-"],
         },
-        goals={"Amin": "Finish weekly board"},
+        goals={"Amin": "Ship M1"},
         final_pct={"Amin": "N/A"},
         people=["Amin"],
     )
+    assert md.startswith("#weekly # amin")
     assert f"Week {week.week_number}" in md
-    assert "| Person | Saturday | Sunday | Monday | Tuesday | Wednesday | Thursday | Goal | Final % |" in md
-    assert "#weekly # amin" in md
     assert "### Assigned Tasks" in md
     assert "### Completed Work" in md
-    assert "Final %" in md
-    assert "N/A" in md
+    assert "| Person | Saturday |" not in md
+    assert "Final %" not in md
     assert "id=" not in md.lower()
 
 
-def test_format_monthly_structure():
+def test_monthly_markdown_no_progress_table():
     md = format_monthly_markdown(
         person="Amin",
-        month_label="مهر ۱۴۰۴",
+        month_label="مهر ۱۴۰۵",
         narrative={
-            "assigned": ["Reports"],
-            "completed": ["Daily format"],
-            "in_progress": ["Weekly table"],
-            "next_month": ["Polish"],
+            "assigned": ["A"],
+            "completed": ["B"],
+            "in_progress": ["C"],
+            "next_month": ["D"],
             "blockers": ["-"],
             "suggestions": ["-"],
         },
-        table_rows=[
-            {
-                "person": "Amin",
-                "completed": "Daily + weekly",
-                "in_progress": "Monthly",
-                "goal": "Ship",
-                "final_pct": "N/A",
-            }
-        ],
+        table_rows=[],
     )
-    assert "#monthly # amin" in md
+    assert md.startswith("#monthly # amin")
     assert "Month:" in md
-    assert "| Person | Completed Work | In Progress | Goal | Final % |" in md
-    assert "N/A" in md
+    assert "| Person | Completed Work |" not in md
+    assert "Final %" not in md
+    assert "id=" not in md.lower()
 
 
-def test_extract_explicit_percentage():
-    assert extract_explicit_percentage(["progress: 80%"]) == "80%"
+def test_extract_percentage_evidence_based():
+    assert extract_explicit_percentage(["progress: 70%"]) == "70%"
     assert extract_explicit_percentage(["no numbers here"]) is None
-    assert extract_explicit_percentage(["done 100%"]) == "100%"
+    assert extract_explicit_percentage(["about half done"]) is None
 
 
-def test_final_pct_na_without_evidence():
-    week = work_week_for(date(2025, 9, 20))
-    result = final_pct_for_people(
-        [{"person": "Amin", "report_date": "2025-09-15", "raw_text": "worked", "generated_report": ""}],
-        week,
+def test_no_fabricated_pct_in_weekly():
+    week = work_week_for(date(2026, 9, 27))
+    md = format_weekly_markdown(
+        person=None,
+        week=week,
+        day_summaries={"Sara": {}},
+        narrative={
+            "assigned": [],
+            "completed": [],
+            "in_progress": [],
+            "next_week": [],
+            "blockers": [],
+            "suggestions": [],
+        },
+        goals={"Sara": "—"},
+        final_pct={"Sara": "N/A"},
+        people=["Sara"],
     )
-    # Either N/A or missing if date outside prev week
-    for v in result.values():
-        assert v == "N/A" or v.endswith("%")
+    assert "### Assigned Tasks" in md
+    assert "| Sara |" not in md
