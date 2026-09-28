@@ -99,10 +99,12 @@ def create_report(
     report_date: date | None = None,
     start_time: time | None = None,
     end_time: time | None = None,
+    path: str | None = None,
     generate: bool = True,
     client: OpenAI | None = None,
 ) -> Report:
-    logger.info("report received for person=%s", person)
+    """Parse, optionally generate, and persist a daily report."""
+    logger.info("report received for person=%s path=%s", person, path)
     parsed = parse_report(
         raw_text=raw_text,
         person=person,
@@ -119,6 +121,7 @@ def create_report(
             logger.warning("generation skipped due to error: %s", exc)
             generated = _fallback_report(parsed)
 
+    path_val = (path or "").strip() or None
     report = Report(
         person=parsed.person,
         report_date=parsed.report_date,
@@ -126,13 +129,15 @@ def create_report(
         end_time=parsed.end_time,
         raw_text=parsed.raw_text,
         generated_report=generated,
+        path=path_val,
     )
     session.add(report)
     session.flush()
     logger.info(
-        "report saved id=%s person=%s date=%s",
+        "report saved id=%s person=%s date=%s path=%s",
         report.id,
         report.person,
         report.report_date,
+        report.path,
     )
     return report
